@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WEB IVOIRE - LIVE</title>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
+    
+    <style>
+        /* --- Garde ton CSS tel quel, il est parfait --- */
+        :root { --primary-orange: #FF8200; --white: #FFFFFF; --primary-green: #009E60; --bg: #0a0c10; --card-bg: #1a1d23; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--white); margin: 0; padding-bottom: 50px; }
+        header { position: sticky; top: 0; width: 100%; z-index: 1000; background: rgba(10, 12, 16, 0.95); backdrop-filter: blur(15px); padding: 15px 0; display: flex; flex-direction: column; align-items: center; border-bottom: 3px solid var(--primary-orange); }
+        .search-bar { width: 80%; max-width: 400px; padding: 12px 20px; border-radius: 25px; border: 2px solid var(--primary-green); background: rgba(255, 255, 255, 0.05); color: white; margin-top: 10px; outline: none; }
+        .upload-section { max-width: 500px; margin: 20px auto; background: var(--card-bg); padding: 20px; border-radius: 20px; border: 1px solid var(--primary-green); text-align: center; }
+        .upload-section input[type="text"] { width: 100%; padding: 12px; margin-bottom: 15px; border-radius: 10px; border: 1px solid #333; background: #0d1117; color: white; box-sizing: border-box; }
+        .video-grid { display: flex; overflow-x: auto; gap: 25px; padding: 20px 40px; scroll-snap-type: x mandatory; }
+        .video-card { min-width: 350px; max-width: 350px; scroll-snap-align: center; background: var(--card-bg); border-radius: 25px; overflow: hidden; border: 2px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+        .video-container { width: 100%; aspect-ratio: 4/3; background: #000; }
+        video { width: 100%; height: 100%; display: block; }
+        .video-overlay-info { padding: 15px; border-left: 5px solid var(--primary-orange); background: rgba(255,255,255,0.02); }
+        .video-title { font-size: 1.1rem; font-weight: 700; color: var(--white); }
+        .interaction-bar { display: flex; justify-content: space-around; padding: 15px 0; background: rgba(0,0,0,0.3); border-top: 1px solid rgba(255,255,255,0.05); }
+        .btn-action { background: none; border: none; color: var(--white); cursor: pointer; font-size: 1rem; display: flex; align-items: center; gap: 8px; }
+        .comment-section { background: rgba(0,0,0,0.2); padding: 10px 15px; max-height: 100px; overflow-y: auto; font-size: 0.85rem; }
+        .comment-item { margin-bottom: 5px; color: #ccc; border-bottom: 1px solid rgba(0, 158, 96, 0.2); }
+        .comment-input-box { display: flex; padding: 10px; background: #0d1117; }
+        .comment-input-box input { flex: 1; background: transparent; border: none; color: white; outline: none; }
+        .btn-publish { width: 100%; padding: 12px; background: linear-gradient(45deg, var(--primary-orange), var(--primary-green)); color: white; text-align: center; font-weight: 900; border-radius: 12px; border: none; cursor: pointer; }
+        .status-msg { font-size: 0.8rem; color: var(--primary-orange); margin-top: 5px; display: none; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1 style="margin:0; letter-spacing: 2px;"> <span style="color:var(--primary-orange)">WEB IVOIRE</span></h1>
+        <input type="text" id="searchBar" class="search-bar" placeholder="Rechercher..." oninput="filterVideos()">
+    </header>
+
+    <div class="main-content">
+        <section class="upload-section">
+            <h3 style="margin-top:0; color: var(--primary-orange);">PARTAGER UNE VIDÉO</h3>
+            <input type="text" id="videoTitle" placeholder="Titre de la vidéo">
+            <input type="file" id="videoFile" accept="video/*" style="margin-bottom:15px; width: 100%;">
+            <button class="btn-publish" id="publishBtn" onclick="addVideo()">PUBLIER SUR LE CLOUD</button>
+            <div id="status" class="status-msg">Téléchargement en cours... patientez...</div>
+        </section>
+
+        <div class="video-grid" id="videoGrid"></div>
+    </div>
+
+    <script>
+        // --- CONFIGURATION FIREBASE (REMPLACE PAR TES INFOS) ---
+        const firebaseConfig = {
+    apiKey: "AIzaSyDFdSk2ukw24M5bx4y9i78EcHQsKBfGTMQ",
+    authDomain: "web-ivoire-b1350.firebaseapp.com",
+    databaseURL: "https://web-ivoire-b1350-default-rtdb.firebaseio.com",
+    projectId: "web-ivoire-b1350",
+    storageBucket: "web-ivoire-b1350.firebasestorage.app",
+    messagingSenderId: "145799870048",
+    appId: "1:145799870048:web:57cdae482c5415dccb7505",
+    measurementId: "G-Y9R9BS2ZF7"
+
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const storage = firebase.storage();
+
+        // --- CHARGEMENT DES VIDÉOS DEPUIS INTERNET ---
+        db.collection("videos").orderBy("createdAt", "desc").onSnapshot((snapshot) => {
+            const videoList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            renderAllVideos(videoList);
+        });
+
+        async function addVideo() {
+            const titleInput = document.getElementById('videoTitle');
+            const fileInput = document.getElementById('videoFile');
+            const status = document.getElementById('status');
+            const btn = document.getElementById('publishBtn');
+
+            if (!fileInput.files[0] || titleInput.value.trim() === "") {
+                alert("Remplis tout avant de publier !");
+                return;
+            }
+
+            // 1. Désactiver le bouton pendant l'envoi
+            btn.disabled = true;
+            status.style.display = "block";
+
+            const file = fileInput.files[0];
+            const fileName = Date.now() + "_" + file.name;
+            const storageRef = storage.ref('videos/' + fileName);
+
+            try {
+                // 2. Envoyer la vidéo au stockage cloud
+                const snapshot = await storageRef.put(file);
+                const videoURL = await snapshot.ref.getDownloadURL();
+
+                // 3. Enregistrer les infos dans la base de données
+                await db.collection("videos").add({
+                    title: titleInput.value,
+                    url: videoURL,
+                    likes: 0,
+                    comments: [],
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+
+                titleInput.value = "";
+                fileInput.value = "";
+                alert("Vidéo publiée avec succès !");
+            } catch (error) {
+                console.error(error);
+                alert("Erreur lors de la publication.");
+            } finally {
+                btn.disabled = false;
+                status.style.display = "none";
+            }
+        }
+
+        async function toggleLike(id, currentLikes) {
+            await db.collection("videos").doc(id).update({
+                likes: currentLikes + 1
+            });
+        }
+
+        async function addComment(event, id) {
+            if (event.key === "Enter") {
+                const commentText = event.target.value;
+                if (commentText.trim() === "") return;
+                
+                const docRef = db.collection("videos").doc(id);
+                const doc = await docRef.get();
+                const currentComments = doc.data().comments || [];
+                
+                await docRef.update({
+                    comments: [...currentComments, commentText]
+                });
+                event.target.value = "";
+            }
+        }
+
+        function renderAllVideos(videos) {
+            const grid = document.getElementById('videoGrid');
+            grid.innerHTML = "";
+
+            videos.forEach(v => {
+                const card = document.createElement('div');
+                card.className = 'video-card';
+                card.innerHTML = `
+                    <div class="video-container">
+                        <video src="${v.url}" controls playsinline></video>
+                    </div>
+                    <div class="video-overlay-info">
+                        <span class="video-title">${v.title}</span>
+                    </div>
+                    <div class="interaction-bar">
+                        <button class="btn-action" onclick="toggleLike('${v.id}', ${v.likes})">
+                            🧡 <span>${v.likes}</span>
+                        </button>
+                        <button class="btn-action">
+                            💬 <span>${v.comments ? v.comments.length : 0}</span>
+                        </button>
+                        <a href="${v.url}" target="_blank" download style="text-decoration:none;">📥</a>
+                    </div>
+                    <div class="comment-section">
+                        ${v.comments ? v.comments.map(c => `<div class="comment-item">• ${c}</div>`).join('') : ''}
+                    </div>
+                    <div class="comment-input-box">
+                        <input type="text" placeholder="Commenter..." onkeypress="addComment(event, '${v.id}')">
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+        }
+    </script>
+</body>
+</html>
